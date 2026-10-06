@@ -17,6 +17,7 @@ namespace {
 const char* TAG = "hg.audio";
 constexpr size_t kMicChunk = 320;           // 20 ms at 16 kHz
 constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server paces 0.5 s ahead
+static_assert(kSpeakerBuffer % sizeof(int16_t) == 0, "the speaker buffer must hold whole samples");
 constexpr size_t kSpeakerChunk = 512;       // samples per I2S write
 
 i2s_std_config_t std_config(uint32_t rate, i2s_data_bit_width_t bits, int bclk, int ws, int dout, int din) {
@@ -90,16 +91,22 @@ void I2sMic::task(void* arg) {
 // --------------------------------------------------------------------------
 // Speaker
 
+StreamBufferHandle_t make_speaker_buffer(StaticStreamBuffer_t& control) {
+  // A static stream buffer holds one byte less than its size (xStreamBufferCreate adds
+  // that byte itself), so size it one larger to keep the capacity whole samples.
+  constexpr size_t kStorage = kSpeakerBuffer + 1;
+  auto* storage = static_cast<uint8_t*>(heap_caps_malloc(kStorage, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  return storage ? xStreamBufferCreateStatic(kStorage, 1, storage, &control) : xStreamBufferCreate(16 * 1024, 1);
+}
+
 bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.auto_clear = true;  // silence on underrun instead of repeating the last buffer
   if (i2s_new_channel(&chan, &tx_, nullptr) != ESP_OK) return false;
   i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_16BIT, cfg.bclk, cfg.ws, cfg.dout, -1);
   if (i2s_channel_init_std_mode(tx_, &std_cfg) != ESP_OK) return false;
-  uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
-  if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
-  else buffer_ = xStreamBufferCreate(16 * 1024, 1);
+  buffer_ = make_speaker_buffer(control);
   if (!buffer_) return false;
   xTaskCreate(&I2sSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
   ESP_LOGI(TAG, "speaker ready");

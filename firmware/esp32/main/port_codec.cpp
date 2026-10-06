@@ -6,7 +6,6 @@
 #include <cstring>
 
 #include "esp_codec_dev_defaults.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/task.h"
 
@@ -15,7 +14,6 @@ namespace {
 
 const char* TAG = "hg.codec";
 constexpr size_t kMicChunk = 320;             // 20 ms at 16 kHz
-constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server paces 0.5 s ahead
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
 constexpr uint8_t kMic1And2 = 0x03;           // ES7210 inputs MIC1 | MIC2 (ES7120_SEL_MIC1 | ES7120_SEL_MIC2)
 
@@ -169,10 +167,8 @@ void CodecMic::task(void* arg) {
 bool CodecSpeaker::begin(esp_codec_dev_handle_t dev) {
   if (!dev) return false;
   dev_ = dev;
-  uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
-  if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
-  else buffer_ = xStreamBufferCreate(16 * 1024, 1);
+  buffer_ = make_speaker_buffer(control);
   if (!buffer_) return false;
   xTaskCreate(&CodecSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
   return true;

@@ -149,6 +149,10 @@ class I2sMic final : public hg::AudioIn {
   std::atomic<bool> capturing_{false};
 };
 
+// The playback buffer both speakers write into: about 1.5 s of 16 kHz PCM16, in
+// PSRAM when it can be allocated. `control` must outlive the buffer.
+StreamBufferHandle_t make_speaker_buffer(StaticStreamBuffer_t& control);
+
 // I2S amplifier fed from a stream buffer by a writer task.
 class I2sSpeaker final : public hg::AudioOut {
  public:
