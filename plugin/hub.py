@@ -89,6 +89,17 @@ class _Upload:
     truncated: bool = False
 
 
+def schedule_frame(played_until: float, now: float, frame_s: float) -> tuple[float, float]:
+    """Seconds to wait before sending the next frame, and when the device finishes playing it.
+
+    Frames go out at most ``PLAYBACK_LEAD_S`` ahead of playback. After a producer stall the
+    device has played everything sent so far, so playback restarts from now instead of
+    carrying the deficit forward, which would send the backlog in one burst.
+    """
+    start = max(played_until, now)
+    return max(0.0, start - now - PLAYBACK_LEAD_S), start + frame_s
+
+
 class AudioOut:
     """One outbound audio stream, resampled to the device rate and paced.
 
@@ -108,7 +119,6 @@ class AudioOut:
         self._task: asyncio.Task | None = None
         self.closed = False
         self.aborted = False
-        self.sent_seconds = 0.0
         self.done = asyncio.Event()
 
     async def start(self, *, turn: str | None = None) -> None:
@@ -149,20 +159,17 @@ class AudioOut:
     async def _pump(self) -> None:
         loop = asyncio.get_running_loop()
         seq = 0
-        base = loop.time()
+        played_until = loop.time()
         try:
             while True:
                 frame = await self._queue.get()
                 if frame is None:
                     break
-                ahead = self.sent_seconds - (loop.time() - base)
-                if ahead < 0:
-                    base += ahead  # producer stalled: rebase so we never burst past the lead
-                elif ahead > PLAYBACK_LEAD_S:
-                    await asyncio.sleep(ahead - PLAYBACK_LEAD_S)
+                wait, played_until = schedule_frame(played_until, loop.time(), len(frame) / 2 / self.rate)
+                if wait:
+                    await asyncio.sleep(wait)
                 await self._session.send_binary(protocol.binary(protocol.CHANNEL_AUDIO, self.stream, seq, frame))
                 seq += 1
-                self.sent_seconds += len(frame) / 2 / self.rate
             await self._session.send_json(protocol.message("audio.end", stream=self.stream))
         except asyncio.CancelledError:
             pass

@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-from hermes_gadget_plugin import audio, textfmt
+from hermes_gadget_plugin import audio, hub, textfmt
 from hermes_gadget_plugin.store import DeviceStore
 
 
@@ -73,6 +73,24 @@ def test_wav_round_trip_through_decode(tmp_path):
     assert abs(len(decoded) // 2 - 4000) <= 2
     with wave.open(io.BytesIO(audio.wav_bytes(pcm, 24000))) as w:
         assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (24000, 1, 2)
+
+
+# -- audio pacing ------------------------------------------------------------------------
+
+def test_frames_go_out_until_playback_is_a_lead_ahead():
+    assert hub.schedule_frame(10.25, 10.0, 0.03125) == (0.0, 10.28125)
+    assert hub.schedule_frame(10.75, 10.0, 0.03125) == (0.25, 10.78125)
+
+
+def test_a_producer_stall_restarts_playback_from_now():
+    # Two seconds of TTS queued after playback ran dry used to go out in one burst.
+    resumed, played_until, sent = 10.125, 10.0, 0.0
+    now = resumed
+    for _ in range(64):  # the backlog, queued at once
+        wait, played_until = hub.schedule_frame(played_until, now, 0.03125)
+        now += wait  # the pump sleeps; sending takes no time
+        sent += 0.03125
+        assert sent - (now - resumed) <= hub.PLAYBACK_LEAD_S + 0.03125  # how far ahead the device is
 
 
 # -- store -------------------------------------------------------------------------------
