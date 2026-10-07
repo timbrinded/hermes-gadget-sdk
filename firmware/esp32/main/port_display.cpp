@@ -30,7 +30,8 @@ constexpr ledc_channel_t kBlChannel = LEDC_CHANNEL_0;
 bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* ctx) {
   BaseType_t woken = pdFALSE;
   xSemaphoreGiveFromISR(static_cast<SpiDisplay*>(ctx)->done_, &woken);
-  return woken == pdTRUE;
+  if (woken) portYIELD_FROM_ISR();  // the SPI panel IO ignores this callback's return value
+  return false;
 }
 
 bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {

@@ -79,7 +79,8 @@ constexpr InitCommand kInit368[] = {
 bool AmoledDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* ctx) {
   BaseType_t woken = pdFALSE;
   xSemaphoreGiveFromISR(static_cast<AmoledDisplay*>(ctx)->done_, &woken);
-  return woken == pdTRUE;
+  if (woken) portYIELD_FROM_ISR();  // the SPI panel IO ignores this callback's return value
+  return false;
 }
 
 void AmoledDisplay::command(uint8_t cmd, const uint8_t* data, size_t len) {
